@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import Navbar from '@/components/common/Navbar';
 import { useRouter } from 'next/navigation';
@@ -14,6 +15,8 @@ export default function Dashboard() {
   const { user, token, API_BASE_URL, logout } = useAuth();
   const router = useRouter();
 
+  const normalizeName = (value) => value?.trim().toLowerCase().replace(/^dr\.?\s+/, '') ?? '';
+
   // Navigation Guard
   useEffect(() => {
     if (!user) {
@@ -21,10 +24,9 @@ export default function Dashboard() {
     }
   }, [user]);
 
-  if (!user) return null;
 
   // Global State
-  const [activeTab, setActiveTab] = useState(user.role === 'ADMIN' ? 'reports' : user.role === 'RECEPTIONIST' ? 'patients' : 'appointments');
+const [activeTab, setActiveTab] = useState(user?.role === 'ADMIN' ? 'reports' : user?.role === 'RECEPTIONIST' ? 'patients' : 'appointments');
 
   // ==========================================
   // STATE FOR RECEPTIONIST WORKFLOWS
@@ -67,6 +69,13 @@ export default function Dashboard() {
   const [adminReportLoading, setAdminReportLoading] = useState(false);
   const [adminSearchQuery, setAdminSearchQuery] = useState('');
 
+  const safeDoctorsList = Array.isArray(doctorsList) ? doctorsList : [];
+
+  const currentDoctor = user?.role === 'DOCTOR'
+    ? safeDoctorsList.find((doctor) => doctor.userId === user.id) ??
+      safeDoctorsList.find((doctor) => normalizeName(doctor.name) === normalizeName(user.name))
+    : null;
+   
   // ==========================================
   // RECEPTIONIST FUNCTIONS
   // ==========================================
@@ -97,27 +106,33 @@ export default function Dashboard() {
 
   // Trigger Patient List Fetch (Every keystroke trigger re-renders parent! - Performance bug)
   useEffect(() => {
-    if (user.role === 'RECEPTIONIST' || user.role === 'ADMIN') {
+    if (user?.role === 'RECEPTIONIST' || user?.role === 'ADMIN') {
       fetchPatients(1);
     }
   }, [patientSearch, patientGender]);
 
   // Fetch Doctors for booking drop-down
   const fetchDoctorsDropdown = async () => {
+    if (!token) return;
     try {
       const res = await fetch(`${API_BASE_URL}/doctors`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      if (!res.ok) {
+        setDoctorsList([]);
+        return;
+      }
       const data = await res.json();
-      setDoctorsList(data);
+      setDoctorsList(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);
+      setDoctorsList([]);
     }
   };
 
   useEffect(() => {
     fetchDoctorsDropdown();
-  }, []);
+  }, [token]);
 
   // Handle Patient Registration
   const handleRegisterPatient = async (e) => {
@@ -196,7 +211,7 @@ export default function Dashboard() {
       if (res.ok) {
         setBookingMessage('Success: Appointment booked successfully!');
         setBookingReason('');
-        if (user.role === 'DOCTOR') fetchDoctorWorklist();
+        if (user?.role === 'DOCTOR') fetchDoctorWorklist();
       } else {
         setBookingMessage(`Error: ${data.error || 'Failed to book'}`);
       }
@@ -240,7 +255,7 @@ export default function Dashboard() {
       const data = await res.json();
       if (res.ok) {
         setCheckinMessage(`Checked in! Generated Token #${data.token.tokenNumber}`);
-        if (user.role === 'DOCTOR') fetchDoctorWorklist();
+        if (user?.role === 'DOCTOR') fetchDoctorWorklist();
       } else {
         setCheckinMessage(`Error check-in: ${data.error}`);
       }
@@ -253,23 +268,29 @@ export default function Dashboard() {
   // DOCTOR WORKFLOW FUNCTIONS
   // ==========================================
   const fetchDoctorWorklist = async () => {
-    if (user.role !== 'DOCTOR') return;
+    if (user?.role !== 'DOCTOR') return;
     try {
-      // Find matching doctor from doctors dropdown using user ID link
-      const matchedDoc = doctorsList.find(d => d.userId === user.id);
-      if (!matchedDoc) return;
+      if (!currentDoctor) {
+        setDoctorAppointments([]);
+        setDoctorQueue([]);
+        return;
+      }
 
       // 1. Fetch appointments for this doctor (N+1 database queries triggers inside server)
-      const appRes = await fetch(`${API_BASE_URL}/appointments?doctorId=${matchedDoc.id}`, {
+      const appRes = await fetch(`${API_BASE_URL}/appointments?doctorId=${currentDoctor.id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const appData = await appRes.json();
       if (appData.success) {
-        setDoctorAppointments(appData.appointments);
+        const today = new Date().toDateString();
+        const todaysAppointments = appData.appointments.filter(
+          (appointment) => new Date(appointment.appointmentDate).toDateString() === today
+        );
+        setDoctorAppointments(todaysAppointments);
       }
 
       // 2. Fetch queue list for this doctor today
-      const queueRes = await fetch(`${API_BASE_URL}/queue?doctorId=${matchedDoc.id}`, {
+      const queueRes = await fetch(`${API_BASE_URL}/queue?doctorId=${currentDoctor.id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const queueData = await queueRes.json();
@@ -281,10 +302,13 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    if (user.role === 'DOCTOR' && doctorsList.length > 0) {
+    if (user?.role === 'DOCTOR' && doctorsList.length > 0) {
       fetchDoctorWorklist();
     }
-  }, [doctorsList]);
+  }, [user, doctorsList, token]);
+
+    if (!user) return null;
+
 
   // Update token status (WAITING -> CALLING -> COMPLETED / SKIPPED)
   const handleUpdateQueueStatus = async (tokenId, newStatus) => {
@@ -372,7 +396,7 @@ export default function Dashboard() {
         
         {/* Navigation Tabs based on Role */}
         <div className="flex border-b border-slate-200 dark:border-slate-800 mb-8 overflow-x-auto gap-4">
-          {user.role === 'ADMIN' && (
+          {user?.role === 'ADMIN' && (
             <>
               <button
                 onClick={() => setActiveTab('reports')}
@@ -389,7 +413,7 @@ export default function Dashboard() {
             </>
           )}
 
-          {(user.role === 'RECEPTIONIST' || user.role === 'ADMIN') && (
+          {(user?.role === 'RECEPTIONIST' || user?.role === 'ADMIN') && (
             <>
               <button
                 onClick={() => setActiveTab('patients')}
@@ -406,7 +430,7 @@ export default function Dashboard() {
             </>
           )}
 
-          {user.role === 'DOCTOR' && (
+          {user?.role === 'DOCTOR' && (
             <>
               <button
                 onClick={() => setActiveTab('appointments')}
@@ -842,8 +866,11 @@ export default function Dashboard() {
                               <>
                                 <button
                                   onClick={() => {
-                                    const matchedDoc = doctorsList.find(d => d.userId === user.id);
-                                    handleQueueCheckin(app.patientId, matchedDoc.id, app.id);
+                                    if (!currentDoctor) {
+                                      alert('Doctor profile could not be resolved. Please contact support.');
+                                      return;
+                                    }
+                                    handleQueueCheckin(app.patientId, currentDoctor.id, app.id);
                                   }}
                                   className="text-xxs px-2.5 py-1 rounded bg-teal-500/10 text-teal-600 dark:text-teal-400 font-extrabold hover:bg-teal-500 hover:text-white transition-colors"
                                 >
@@ -894,7 +921,7 @@ export default function Dashboard() {
                       without optional chaining! If medicalHistory is null (which is the case for Batman, Clark Kent, etc.),
                       this code throws: "Cannot read properties of null (reading 'toUpperCase')" and crashes the app! */}
                   <p className="text-slate-700 dark:text-slate-300 leading-5 text-sm font-semibold">
-                    {selectedPatientHistory.medicalHistory.toUpperCase()}
+                    {selectedPatientHistory.medicalHistory?.toUpperCase() ?? 'No medical history recorded'}
                   </p>
                 </div>
 
