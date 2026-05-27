@@ -1,5 +1,12 @@
 # HAQMS Internship Assignment Documentation
 
+## Deployment Links
+
+- Frontend (Cloudflare Pages): https://haqms.pages.dev/login
+- Backend (Render): https://haqms-backend-pgf0.onrender.com
+- Backend Health Check: https://haqms-backend-pgf0.onrender.com/health
+- Database: Neon PostgreSQL
+
 ## Overview
 
 This submission focuses on improving the existing HAQMS full-stack hospital management application across security, performance, backend correctness, frontend stability, and incomplete feature coverage.
@@ -120,15 +127,14 @@ The queue check-in flow still contains a concurrency/race-condition vulnerabilit
 
 ### 3. Deployment
 
-Deployment is still pending. The expected plan is:
+The application has been deployed using:
 
-- frontend on Vercel
+- frontend on Cloudflare Pages
 - backend on Render
-- database on Neon or another hosted PostgreSQL provider
+- database on Neon PostgreSQL
 
 ### 4. Submission artifacts still pending
 
-- deployed application URL
 - video walkthrough
 - final Google Form submission
 
@@ -166,4 +172,4 @@ This submission improves the HAQMS project across:
 - missing feature completion
 - doctor workflow reliability
 
-The core coding/debugging portion of the assignment is substantially complete. The main remaining work is deployment, final documentation sharing, video recording, and submission.
+The core coding/debugging portion of the assignment is substantially complete. The main remaining work is final documentation sharing, video recording, and Google Form submission.
