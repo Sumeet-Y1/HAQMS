@@ -44,6 +44,15 @@ app.get('/', (req, res) => {
   });
 });
 
+// Health route for uptime monitoring and deployment checks
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'haqms-backend',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // GLOBAL ERROR HANDLER
 // BUG: Improper error handling. It returns the raw error stack trace to the client,
 // which leaks details about database types, schema layout, and file paths.
