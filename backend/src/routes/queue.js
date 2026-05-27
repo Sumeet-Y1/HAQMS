@@ -5,6 +5,11 @@ const { authenticate } = require('../middleware/auth');
 const router = express.Router();
 const prisma = new PrismaClient();
 
+const isRetryableTransactionError = (error) => {
+  const message = error?.message || '';
+  return error?.code === 'P2034' || message.includes('Please retry your transaction');
+};
+
 // GET /api/queue
 // List all active queue tokens
 router.get('/', async (req, res) => {
@@ -32,9 +37,6 @@ router.get('/', async (req, res) => {
 
 // POST /api/queue/checkin
 // Generate a new queue token for a patient
-// CONCURRENCY/RACE CONDITION BUG: Token increment uses aggregate read followed by create.
-// Introduce a deliberate asynchronous delay (setTimeout) to force a wide race window
-// where concurrent check-ins assign the exact same token number.
 router.post('/checkin', authenticate, async (req, res) => {
   try {
     const { patientId, doctorId, appointmentId } = req.body;
@@ -46,39 +48,53 @@ router.post('/checkin', authenticate, async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // 1. Fetch current maximum token number for this doctor today
-    const maxTokenResult = await prisma.queueToken.aggregate({
-      where: {
-        doctorId,
-        createdAt: { gte: today },
-      },
-      _max: {
-        tokenNumber: true,
-      },
+    const lockKey = `queue:${doctorId}:${today.toISOString().slice(0, 10)}`;
+
+    const runCheckIn = async () => prisma.$transaction(async (tx) => {
+      // Serialize token generation per doctor per day to avoid duplicate token numbers.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+
+      const maxTokenResult = await tx.queueToken.aggregate({
+        where: {
+          doctorId,
+          createdAt: { gte: today },
+        },
+        _max: {
+          tokenNumber: true,
+        },
+      });
+
+      const nextTokenNumber = (maxTokenResult._max.tokenNumber || 0) + 1;
+
+      return tx.queueToken.create({
+        data: {
+          tokenNumber: nextTokenNumber,
+          patientId,
+          doctorId,
+          appointmentId: appointmentId || null,
+          status: 'WAITING',
+        },
+        include: {
+          patient: true,
+          doctor: true,
+        },
+      });
+    }, {
+      isolationLevel: 'Serializable',
     });
 
-    const currentMax = maxTokenResult._max.tokenNumber || 0;
-    const nextTokenNumber = currentMax + 1;
-
-    // PERFORMANCE/CONCURRENCY BUG: Artificial sleep to widen the race condition window.
-    // In production under microservices or high load, network delay does this naturally.
-    // Junior developer comment: "Adding sleep to make sure db registers the record correctly before moving forward"
-    await new Promise((resolve) => setTimeout(resolve, 350));
-
-    // 2. Insert new token
-    const newToken = await prisma.queueToken.create({
-      data: {
-        tokenNumber: nextTokenNumber,
-        patientId,
-        doctorId,
-        appointmentId: appointmentId || null,
-        status: 'WAITING',
-      },
-      include: {
-        patient: true,
-        doctor: true,
-      },
-    });
+    let newToken;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        newToken = await runCheckIn();
+        break;
+      } catch (error) {
+        if (!isRetryableTransactionError(error) || attempt === 4) {
+          throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+      }
+    }
 
     res.status(201).json({
       message: 'Checked in successfully. Token generated.',

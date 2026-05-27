@@ -9,16 +9,11 @@ export default function QueueMonitor() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
-  // Duplicated config state just to add minor code smell
   const [refreshCount, setRefreshCount] = useState(0);
-
-  // HARDCODED API BASE URL: Duplicated from AuthContext (code duplication smell)
-  const API_BASE_URL = 'http://localhost:5000/api';
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000/api';
 
   const fetchQueueData = async () => {
     try {
-      // Insecure: Fetches queue without checking credentials (it's a public dashboard, which is fine, 
-      // but it uses the hardcoded API domain)
       const res = await fetch(`${API_BASE_URL}/queue`);
       if (!res.ok) {
         throw new Error('Failed to retrieve active token queue.');

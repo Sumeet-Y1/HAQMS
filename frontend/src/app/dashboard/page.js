@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useDeferredValue, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import Navbar from '@/components/common/Navbar';
@@ -34,6 +34,7 @@ const [activeTab, setActiveTab] = useState(user?.role === 'ADMIN' ? 'reports' : 
   const [patients, setPatients] = useState([]);
   const [patientsLoading, setPatientsLoading] = useState(false);
   const [patientSearch, setPatientSearch] = useState('');
+  const deferredPatientSearch = useDeferredValue(patientSearch);
   const [patientGender, setPatientGender] = useState('All');
   const [patientsPagination, setPatientsPagination] = useState({ page: 1, totalPages: 1 });
   
@@ -81,11 +82,17 @@ const [activeTab, setActiveTab] = useState(user?.role === 'ADMIN' ? 'reports' : 
   // ==========================================
   
   // Fetch Patients List
-  const fetchPatients = async (page = 1) => {
+  const fetchPatients = async (page = 1, searchValue = deferredPatientSearch, genderValue = patientGender) => {
     setPatientsLoading(true);
     try {
-      // Inefficient memory pagination called from client
-      const res = await fetch(`${API_BASE_URL}/patients?page=${page}&limit=5&search=${patientSearch}&gender=${patientGender}`, {
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: '5',
+        search: searchValue,
+        gender: genderValue,
+      });
+
+      const res = await fetch(`${API_BASE_URL}/patients?${params.toString()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
@@ -104,12 +111,11 @@ const [activeTab, setActiveTab] = useState(user?.role === 'ADMIN' ? 'reports' : 
     }
   };
 
-  // Trigger Patient List Fetch (Every keystroke trigger re-renders parent! - Performance bug)
   useEffect(() => {
     if (user?.role === 'RECEPTIONIST' || user?.role === 'ADMIN') {
       fetchPatients(1);
     }
-  }, [patientSearch, patientGender]);
+  }, [deferredPatientSearch, patientGender, user, token]);
 
   // Fetch Doctors for booking drop-down
   const fetchDoctorsDropdown = async () => {
@@ -371,7 +377,6 @@ const [activeTab, setActiveTab] = useState(user?.role === 'ADMIN' ? 'reports' : 
     }
   };
 
-  // Search Doctors (SQL Injection vulnerable API!)
   const searchPhysiciansAdmin = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/doctors?search=${adminSearchQuery}`, {
@@ -764,8 +769,8 @@ const [activeTab, setActiveTab] = useState(user?.role === 'ADMIN' ? 'reports' : 
 
               <div className="space-y-6">
                 <div className="p-4 rounded-xl border border-teal-500/25 bg-teal-500/10 text-slate-700 dark:text-slate-300 text-xs leading-5">
-                  <strong>Token Generation Engine Note:</strong> Direct arrivals bypass appointments. The token engine automatically fetches the current days maximum token size and increments. 
-                  <span className="block mt-1 font-bold text-rose-500 uppercase tracking-wide">Warning: Vulnerable to check-in race conditions!</span>
+                  <strong>Token Generation Engine Note:</strong> Direct arrivals bypass appointments. Token generation is now serialized per doctor and day to avoid duplicate live queue numbers.
+                  <span className="block mt-1 font-bold text-teal-600 uppercase tracking-wide">Protected against concurrent duplicate token assignment.</span>
                 </div>
 
                 <div className="space-y-4 text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -926,7 +931,6 @@ const [activeTab, setActiveTab] = useState(user?.role === 'ADMIN' ? 'reports' : 
                 </div>
 
                 <div className="pt-2 flex justify-between items-center text-xs">
-                  {/* Incomplete Missing Route trigger -> will route to 404 page! */}
                   <Link 
                     href={`/patients/${selectedPatientHistory.id}/history-records`} 
                     className="text-teal-600 font-extrabold hover:underline flex items-center gap-1"
@@ -1115,7 +1119,7 @@ const [activeTab, setActiveTab] = useState(user?.role === 'ADMIN' ? 'reports' : 
         )}
 
         {/* ==============================================================
-            TAB: PHYSICIAN REGISTRY (ADMIN ROLE - SQL INJECTION VULNERABILITY)
+            TAB: PHYSICIAN REGISTRY (ADMIN ROLE)
             ============================================================== */}
         {activeTab === 'physicians' && (
           <div className="glass p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-md space-y-6">
@@ -1125,7 +1129,7 @@ const [activeTab, setActiveTab] = useState(user?.role === 'ADMIN' ? 'reports' : 
                 Staff Physicians Registry Lookup
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold mt-1">
-                Database lookup for credentials. Uses a raw SQL interpolation backend query.
+                Physician search now uses Prisma filtering with parameterized query generation.
               </p>
             </div>
 
@@ -1138,7 +1142,7 @@ const [activeTab, setActiveTab] = useState(user?.role === 'ADMIN' ? 'reports' : 
                   type="text"
                   value={adminSearchQuery}
                   onChange={(e) => setAdminSearchQuery(e.target.value)}
-                  placeholder="Enter physician name search criteria (raw syntax supported)..."
+                  placeholder="Search physicians by name..."
                   className="block w-full pl-9 pr-3 py-2 border border-slate-300 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
                 />
               </div>
@@ -1147,18 +1151,18 @@ const [activeTab, setActiveTab] = useState(user?.role === 'ADMIN' ? 'reports' : 
                 onClick={searchPhysiciansAdmin}
                 className="glow-btn px-5 py-2 bg-slate-900 text-white dark:bg-teal-500 dark:text-slate-950 font-bold text-xs rounded-lg hover:bg-slate-800 dark:hover:bg-teal-400 transition-colors"
               >
-                Execute SQL Query
+                Search Physicians
               </button>
             </div>
 
-            <div className="p-3 bg-rose-500/10 text-rose-500 text-xs rounded-lg border border-rose-500/20 font-semibold leading-5 flex gap-3">
+            <div className="p-3 bg-teal-500/10 text-teal-700 dark:text-teal-300 text-xs rounded-lg border border-teal-500/20 font-semibold leading-5 flex gap-3">
               <ShieldAlert className="h-5 w-5 shrink-0" />
               <div>
-                <strong>SQL Vulnerability alert:</strong> This search executes raw interpolation: 
+                <strong>Security update:</strong> This search no longer executes raw interpolated SQL.
                 <code className="block bg-black/10 dark:bg-black/30 p-1.5 rounded mt-1 font-mono">
-                  SELECT * FROM &quot;Doctor&quot; WHERE name ILIKE &apos;%&#123;query&#125;%&apos;
+                  prisma.doctor.findMany(&#123; where: &#123; name: &#123; contains: query, mode: 'insensitive' &#125; &#125; &#125; &#125;)
                 </code>
-                Can be audited by inputting standard SQL injection strings to leak full user login lists.
+                Search input is handled through Prisma filtering instead of unsafe raw query string interpolation.
               </div>
             </div>
 
